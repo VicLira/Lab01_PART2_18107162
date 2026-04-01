@@ -213,7 +213,5 @@ class Loader:
         
         finally:
             executor.shutdown(wait=True)
-            
-        return valid_files
         
         

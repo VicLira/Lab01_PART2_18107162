@@ -3,17 +3,18 @@ from dotenv import load_dotenv
 from extract.loader import Loader
 from pipeline.pipeline import Pipeline
 from extract.extractor import Extractor
+from transform.silver.transformer import Transformer as SilverTransformer
 
 
 
 def main():
-    print("Hello from lab01-part2-18107162!")
+    print("Iniciando Pipeline Extração Preços Combustível + GLP")
     pipeline = Pipeline(
                     extractor=Extractor(),
-                    loader=Loader()
+                    loader=Loader(),
+                    silver_transformer=SilverTransformer()
                 )
-    valid_files = pipeline.run()
-    print(valid_files)
+    pipeline.run()
 
 
 if __name__ == "__main__":
