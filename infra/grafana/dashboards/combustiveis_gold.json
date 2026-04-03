@@ -36,19 +36,39 @@
       "id": 2,
       "title": "Preço Médio de Venda por Produto",
       "description": "Comparação do preço médio de venda entre todos os combustíveis",
-      "type": "barchart",
+      "type": "bargauge",
       "gridPos": { "h": 10, "w": 12, "x": 0, "y": 10 },
       "datasource": { "type": "grafana-postgresql-datasource", "uid": "pg-gold" },
       "fieldConfig": {
-        "defaults": { "color": { "mode": "palette-classic" }, "unit": "currencyBRL" },
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "currencyBRL", "min": 0 },
         "overrides": []
       },
-      "options": { "orientation": "horizontal", "legend": { "displayMode": "hidden" }, "barWidth": 0.8 },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "showUnfilled": true,
+        "valueMode": "color",
+        "sizing": "auto",
+        "namePlacement": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": true },
+        "text": {}
+      },
       "targets": [
         {
           "rawSql": "SELECT\n  p.produto AS \"Produto\",\n  ROUND(AVG(f.valor_venda)::numeric, 3) AS \"Preço Médio\"\nFROM fact_precos_combustivel f\nJOIN dim_produto p ON f.produto_id = p.produto_id\nWHERE f.valor_venda > 0\nGROUP BY p.produto\nORDER BY \"Preço Médio\" DESC;",
           "refId": "A",
           "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "rowsToFields",
+          "options": {
+            "mappings": [
+              { "fieldName": "Produto", "handlerKey": "field.name" },
+              { "fieldName": "Preço Médio", "handlerKey": "field.value" }
+            ]
+          }
         }
       ]
     },
@@ -56,19 +76,39 @@
       "id": 3,
       "title": "Volume de Coletas por Ano",
       "description": "Total de registros de preço coletados em cada ano",
-      "type": "barchart",
+      "type": "bargauge",
       "gridPos": { "h": 10, "w": 12, "x": 12, "y": 10 },
       "datasource": { "type": "grafana-postgresql-datasource", "uid": "pg-gold" },
       "fieldConfig": {
-        "defaults": { "color": { "fixedColor": "blue", "mode": "fixed" }, "unit": "short" },
+        "defaults": { "color": { "fixedColor": "blue", "mode": "fixed" }, "unit": "short", "min": 0 },
         "overrides": []
       },
-      "options": { "orientation": "vertical", "legend": { "displayMode": "hidden" }, "barWidth": 0.7 },
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "showUnfilled": true,
+        "valueMode": "color",
+        "sizing": "auto",
+        "namePlacement": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": true },
+        "text": {}
+      },
       "targets": [
         {
           "rawSql": "SELECT\n  d.ano::text AS \"Ano\",\n  COUNT(*)::bigint AS \"Coletas\"\nFROM fact_precos_combustivel f\nJOIN dim_data d ON f.data_id = d.data_id\nGROUP BY d.ano\nORDER BY d.ano;",
           "refId": "A",
           "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "rowsToFields",
+          "options": {
+            "mappings": [
+              { "fieldName": "Ano", "handlerKey": "field.name" },
+              { "fieldName": "Coletas", "handlerKey": "field.value" }
+            ]
+          }
         }
       ]
     },

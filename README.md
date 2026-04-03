@@ -186,5 +186,5 @@ O pipeline é orquestrado pelo `src/pipeline/pipeline.py` e segue a ordem:
 
 ### Pipeline — Execução no Docker
 
-![Pipeline — Execução no Docker](images/2026-04-03_20-02.png)
+![Pipeline — Execução no Docker](images/2026-04-03_20-51.png)
 ![Pipeline — Execução no Docker](images/2026-04-03_19-47.png)
