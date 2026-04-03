@@ -1,0 +1,50 @@
+services:
+  postgres_dw:
+    image: postgres:15
+    container_name: postgres_dw
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - data_network
+
+  pipeline:
+    build:
+      context: .
+      dockerfile: dockerfile
+    container_name: pipeline_app
+    depends_on:
+      - postgres_dw
+    volumes:
+      - ./data:/app/data
+    environment:
+      DB_HOST: ${POSTGRES_HOST}
+      DB_PORT: ${POSTGRES_PORT}
+      DB_NAME: ${POSTGRES_DB}
+      DB_USER: ${POSTGRES_USER}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+    networks:
+      - data_network
+
+  # metabase:
+  #   image: metabase/metabase
+  #   container_name: metabase
+  #   ports:
+  #     - "3000:3000"
+  #   depends_on:
+  #     - postgres_dw
+  #   networks:
+  #     - data_network
+
+volumes:
+  pgdata:
+
+networks:
+  data_network:
+    driver: bridge

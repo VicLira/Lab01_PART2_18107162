@@ -1,6 +1,7 @@
 
 
 import os
+import glob
 import duckdb
 
 from utils.db_functions import fix_unicode_duckdb
@@ -31,36 +32,77 @@ class Transformer:
     # =============================
     # BRONZE RAW
     # =============================
-    def _create_bronze_raw(self, conn: duckdb.DuckDBPyConnection, path: str) -> None:
-        print("\t- CRIANDO TABELA bronze_raw")
-        
-        ## LENDO TUDO COMO TEXTO PARA EVITAR QUEBRA DE DIFERENTES ENCODINGS ENTRE ARQUIVOS
-        conn.execute(f"""
-            CREATE OR REPLACE TABLE bronze_raw AS
+
+    _SELECT_COLUMNS = """
             SELECT 
-                NULLIF(SPLIT_PART(FIX_UNICODE(DS_LINHA),';',1), '')  AS regiao_sigla,
-                NULLIF(SPLIT_PART(FIX_UNICODE(DS_LINHA),';',2), '')  AS estado_sigla,
-                NULLIF(SPLIT_PART(FIX_UNICODE(DS_LINHA),';',3), '')  AS municipio,
-                NULLIF(SPLIT_PART(FIX_UNICODE(DS_LINHA),';',4), '')  AS revenda,
-                NULLIF(SPLIT_PART(FIX_UNICODE(DS_LINHA),';',5), '')  AS cnpj_revenda,
-                NULLIF(SPLIT_PART(FIX_UNICODE(DS_LINHA),';',6), '')  AS nome_rua,
-                NULLIF(SPLIT_PART(FIX_UNICODE(DS_LINHA),';',7), '')  AS numero_rua,
-                NULLIF(SPLIT_PART(FIX_UNICODE(DS_LINHA),';',8), '')  AS complemento,
-                NULLIF(SPLIT_PART(FIX_UNICODE(DS_LINHA),';',9), '')  AS bairro,
-                NULLIF(SPLIT_PART(FIX_UNICODE(DS_LINHA),';',10), '') AS cep,
-                NULLIF(SPLIT_PART(FIX_UNICODE(DS_LINHA),';',11), '') AS produto,
-                NULLIF(SPLIT_PART(FIX_UNICODE(DS_LINHA),';',12), '') AS data_coleta,
-                NULLIF(SPLIT_PART(FIX_UNICODE(DS_LINHA),';',13), '') AS valor_venda,
-                NULLIF(SPLIT_PART(FIX_UNICODE(DS_LINHA),';',14), '') AS valor_compra,
-                NULLIF(SPLIT_PART(FIX_UNICODE(DS_LINHA),';',15), '') AS unidade_medida,
-                NULLIF(SPLIT_PART(FIX_UNICODE(DS_LINHA),';',16), '') AS bandeira
+                filename,
+                "Regiao - Sigla"        AS regiao_sigla,
+                "Estado - Sigla"        AS estado_sigla,
+                "Municipio"             AS municipio,
+                "Revenda"               AS revenda,
+                "CNPJ da Revenda"       AS cnpj_revenda,
+                "Nome da Rua"           AS nome_rua,
+                "Numero Rua"            AS numero_rua,
+                "Complemento"           AS complemento,
+                "Bairro"                AS bairro,
+                "Cep"                   AS cep,
+                "Produto"               AS produto,
+                "Data da Coleta"        AS data_coleta,
+                "Valor de Venda"        AS valor_venda,
+                "Valor de Compra"       AS valor_compra,
+                "Unidade de Medida"     AS unidade_medida,
+                "Bandeira"              AS bandeira
             FROM read_csv(
-                '{path}',
-                delim='^',
-                columns={{'DS_LINHA':'VARCHAR'}},
-                encoding='ISO8859_1'
+                {file_list},
+                delim=';',
+                header=true,
+                all_varchar=true,
+                quote='"',
+                escape='"',
+                filename=true,
+                encoding='{encoding}',
+                ignore_errors=true,
+                null_padding=true
             )
-        """)
+    """
+
+    def _detect_encoding(self, conn: duckdb.DuckDBPyConnection, filepath: str) -> str:
+        """Detecta encoding testando leitura do header + 1ª linha."""
+        for enc in ("utf-8", "iso89"):
+            try:
+                conn.execute(f"""
+                    SELECT * FROM read_csv(
+                        '{filepath}',
+                        delim=';', header=true, all_varchar=true,
+                        quote='"', escape='"',
+                        encoding='{enc}', null_padding=true
+                    ) LIMIT 1
+                """)
+                return enc
+            except Exception:
+                continue
+        return "utf-8"
+
+    def _create_bronze_raw(self, conn: duckdb.DuckDBPyConnection, files: list[str]) -> None:
+        print(f"\t- CRIANDO TABELA bronze_raw ({len(files)} arquivos)")
+
+        # Fase 1: Detectar encoding por arquivo (rápido, só lê header + 1 linha)
+        print("\t- DETECTANDO ENCODING")
+        groups: dict[str, list[str]] = {}
+        for f in files:
+            enc = self._detect_encoding(conn, f)
+            groups.setdefault(enc, []).append(f)
+            print(f"\t  [{os.path.basename(f)}] {enc.upper()}")
+
+        # Fase 2: Carga em lote por grupo de encoding (rápido, DuckDB lê em paralelo)
+        created = False
+        for enc, group_files in groups.items():
+            file_list = "[" + ", ".join(f"'{f}'" for f in group_files) + "]"
+            action = "CREATE OR REPLACE TABLE bronze_raw AS" if not created else "INSERT INTO bronze_raw"
+
+            sql = f"{action}\n{self._SELECT_COLUMNS}"
+            conn.execute(sql.format(file_list=file_list, encoding=enc))
+            created = True
     
     # =============================
     #  LIMPEZA E SILVER
@@ -72,7 +114,8 @@ class Transformer:
             CREATE OR REPLACE TABLE silver AS
             WITH cleaned AS (
                 SELECT
-                    UPPER(TRIM(regiao_sigla)) AS regiao_sigla
+                    filename
+                    ,UPPER(TRIM(regiao_sigla)) AS regiao_sigla
                     ,UPPER(TRIM(estado_sigla)) AS estado_sigla
                     ,UPPER(TRIM(municipio)) AS municipio
                     ,UPPER(TRIM(revenda)) AS revenda
@@ -95,27 +138,28 @@ class Transformer:
             hashed AS (
                 SELECT *,
                     HASH(
-                        regiao_sigla || '|' ||
-                        estado_sigla || '|' ||
-                        municipio || '|' ||
-                        revenda || '|' ||
-                        cnpj_revenda || '|' ||
-                        nome_rua || '|' ||
-                        numero_rua || '|' ||
-                        complemento || '|' ||
-                        bairro || '|' ||
-                        cep || '|' ||
-                        produto || '|' ||
-                        data_coleta || '|' ||
-                        valor_venda || '|' ||
-                        valor_compra || '|' ||
-                        unidade_medida || '|' ||
-                        bandeira
+                        COALESCE(regiao_sigla, '') || '|' ||
+                        COALESCE(estado_sigla, '') || '|' ||
+                        COALESCE(municipio, '') || '|' ||
+                        COALESCE(revenda, '') || '|' ||
+                        COALESCE(cnpj_revenda, '') || '|' ||
+                        COALESCE(nome_rua, '') || '|' ||
+                        COALESCE(numero_rua, '') || '|' ||
+                        COALESCE(complemento, '') || '|' ||
+                        COALESCE(bairro, '') || '|' ||
+                        COALESCE(cep, '') || '|' ||
+                        COALESCE(produto, '') || '|' ||
+                        COALESCE(data_coleta::VARCHAR, '') || '|' ||
+                        COALESCE(valor_venda::VARCHAR, '') || '|' ||
+                        COALESCE(valor_compra::VARCHAR, '') || '|' ||
+                        COALESCE(unidade_medida, '') || '|' ||
+                        COALESCE(bandeira, '')
                     ) AS row_hash
                 FROM cleaned
             )
             SELECT 
-                row_hash
+                filename
+                ,row_hash
                 ,regiao_sigla
                 ,estado_sigla
                 ,municipio
@@ -134,13 +178,12 @@ class Transformer:
                 ,bandeira
                 ,ano
                 ,mes
-            FROM hashed
-            -- FROM (
-            --    SELECT *,
-            --        ROW_NUMBER() OVER (PARTITION BY row_hash) AS rn
-            --    FROM hashed
-            -- )
-            -- WHERE rn = 1;
+            FROM (
+                SELECT *,
+                   ROW_NUMBER() OVER (PARTITION BY row_hash) AS rn
+                FROM hashed
+            )
+            WHERE rn = 1 AND row_hash != '12110636399144143840';
         """)
         
     # =============================
@@ -173,12 +216,12 @@ class Transformer:
         bronze_root = os.path.abspath(os.getenv("BRONZE_DATA_PATH"))
         silver_root = os.path.abspath(os.getenv("SILVER_DATA_PATH"))
         
-        path = os.path.join(bronze_root, "**", "*.csv")
+        csv_files = sorted(glob.glob(os.path.join(bronze_root, "**", "*.csv"), recursive=True))
         conn, db_path = get_conn()
         
         try:
             self._register_functions(conn)
-            self._create_bronze_raw(conn, path)
+            self._create_bronze_raw(conn, csv_files)
             self._create_silver(conn)
             self._persist_silver(conn, silver_root)
         finally:
