@@ -157,9 +157,18 @@ class Validator:
         Cria batch definition, validation definition e checkpoint.
         Executa e gera os Data Docs (HTML).
         """
+        bronze_path = os.path.abspath(os.getenv("BRONZE_DATA_PATH", "data/bronze"))
+        csv_files = sorted(f for f in os.listdir(bronze_path) if f.endswith(".csv"))
+
+        if not csv_files:
+            raise FileNotFoundError(f"Nenhum CSV encontrado em {bronze_path}")
+
+        sample_file = csv_files[0]
+        print(f"\t- ARQUIVO AMOSTRA: {sample_file}")
+
         batch_def = asset.add_batch_definition_path(
             name="sample_batch",
-            path="ca-2004-01.csv",
+            path=sample_file,
         )
 
         vd = gx.ValidationDefinition(

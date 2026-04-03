@@ -71,6 +71,21 @@ class SchemaCreator:
             valor_venda DOUBLE PRECISION,
             valor_compra DOUBLE PRECISION
         );
+
+        -- ==========================================================
+        -- ÍNDICES NA TABELA FATO (performance das queries analíticas)
+        -- ==========================================================
+        CREATE INDEX IF NOT EXISTS idx_fact_data_id
+        ON fact_precos_combustivel(data_id);
+
+        CREATE INDEX IF NOT EXISTS idx_fact_produto_id
+        ON fact_precos_combustivel(produto_id);
+
+        CREATE INDEX IF NOT EXISTS idx_fact_localidade_id
+        ON fact_precos_combustivel(localidade_id);
+
+        CREATE INDEX IF NOT EXISTS idx_fact_posto_id
+        ON fact_precos_combustivel(posto_id);
         """)
 
         conn.commit()

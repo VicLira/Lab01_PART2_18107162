@@ -1,0 +1,17 @@
+apiVersion: 1
+
+datasources:
+  - name: PostgreSQL Gold
+    type: grafana-postgresql-datasource
+    uid: pg-gold
+    access: proxy
+    url: postgres_dw:5432
+    database: combustiveis_dw
+    user: dw_user
+    isDefault: true
+    jsonData:
+      sslmode: disable
+      postgresVersion: 1500
+    secureJsonData:
+      password: dw_pass
+    editable: true

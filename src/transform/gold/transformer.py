@@ -121,7 +121,9 @@ class Transformer:
         cursor.execute("""
         DROP TABLE IF EXISTS staging_silver;
 
-        CREATE TABLE staging_silver (
+        CREATE UNLOGGED TABLE staging_silver (
+            stg_id SERIAL PRIMARY KEY,
+            filename TEXT,
             row_hash TEXT,
             regiao_sigla TEXT,
             estado_sigla TEXT,
@@ -148,6 +150,7 @@ class Transformer:
 
         self.copy_dataframe(pg, df, """
             staging_silver(
+                filename,
                 row_hash,
                 regiao_sigla,
                 estado_sigla,
@@ -170,39 +173,114 @@ class Transformer:
             )
         """)
         
-        print("\t- INSERINDO FATO")
+        print("\t- PREPARANDO INSERÇÃO NA FATO")
 
         cursor = pg.cursor()
+
+        # 1) Índices na staging para JOINs
+        print("\t  ▸ Criando índices na staging")
         cursor.execute("""
-        INSERT INTO fact_precos_combustivel (
-            data_id,
-            produto_id,
-            localidade_id,
-            posto_id,
-            valor_venda,
-            valor_compra
-        )
-        SELECT
-            d.data_id,
-            p.produto_id,
-            l.localidade_id,
-            po.posto_id,
-            s.valor_venda,
-            s.valor_compra
-        FROM staging_silver s
-        JOIN dim_data d 
-            ON s.data_coleta = d.data
-        JOIN dim_produto p 
-            ON s.produto = p.produto
-        AND s.unidade_medida = p.unidade_medida
-        JOIN dim_localidade l 
-            ON s.regiao_sigla = l.regiao_sigla
-        AND s.estado_sigla = l.estado_sigla
-        AND s.municipio = l.municipio
-        JOIN dim_posto po 
-            ON s.cnpj_revenda = po.cnpj_revenda;
+            CREATE INDEX idx_stg_data    ON staging_silver(data_coleta);
+            CREATE INDEX idx_stg_produto ON staging_silver(produto, unidade_medida);
+            CREATE INDEX idx_stg_local   ON staging_silver(regiao_sigla, estado_sigla, municipio);
+            CREATE INDEX idx_stg_cnpj    ON staging_silver(cnpj_revenda);
         """)
         pg.commit()
+
+        cursor.execute("ANALYZE staging_silver;")
+        pg.commit()
+
+        # 2) Materializar dim_posto (1 posto por CNPJ) — evita refazer DISTINCT ON a cada chunk
+        print("\t  ▸ Materializando lookup de postos")
+        cursor.execute("""
+            DROP TABLE IF EXISTS tmp_posto_lookup;
+            CREATE TEMP TABLE tmp_posto_lookup AS
+            SELECT DISTINCT ON (cnpj_revenda) cnpj_revenda, posto_id
+            FROM dim_posto
+            ORDER BY cnpj_revenda, posto_id;
+            CREATE INDEX idx_tmp_posto ON tmp_posto_lookup(cnpj_revenda);
+            ANALYZE tmp_posto_lookup;
+        """)
+        pg.commit()
+
+        # 3) Drop indexes da fato (bulk load pattern — recria no final)
+        print("\t  ▸ Removendo índices da fato (bulk load)")
+        cursor.execute("""
+            DROP INDEX IF EXISTS idx_fact_data_id;
+            DROP INDEX IF EXISTS idx_fact_produto_id;
+            DROP INDEX IF EXISTS idx_fact_localidade_id;
+            DROP INDEX IF EXISTS idx_fact_posto_id;
+        """)
+        pg.commit()
+
+        # 4) Conta total e insere em chunks por stg_id (sem OFFSET)
+        cursor.execute("SELECT MIN(stg_id), MAX(stg_id) FROM staging_silver;")
+        min_id, max_id = cursor.fetchone()
+        total = max_id - min_id + 1
+
+        CHUNK_SIZE = 500_000
+        inserted = 0
+        current_id = min_id
+
+        cursor.execute("SET work_mem = '512MB';")
+        pg.commit()
+
+        print(f"\t- INSERINDO FATO ({total:,} registros, chunks de {CHUNK_SIZE:,})")
+
+        while current_id <= max_id:
+            end_id = current_id + CHUNK_SIZE - 1
+
+            cursor.execute("""
+                INSERT INTO fact_precos_combustivel (
+                    data_id, produto_id, localidade_id, posto_id,
+                    valor_venda, valor_compra
+                )
+                SELECT
+                    d.data_id,
+                    p.produto_id,
+                    l.localidade_id,
+                    po.posto_id,
+                    s.valor_venda,
+                    s.valor_compra
+                FROM staging_silver s
+                JOIN dim_data d
+                    ON s.data_coleta = d.data
+                JOIN dim_produto p
+                    ON s.produto = p.produto
+                   AND s.unidade_medida = p.unidade_medida
+                JOIN dim_localidade l
+                    ON s.regiao_sigla = l.regiao_sigla
+                   AND s.estado_sigla = l.estado_sigla
+                   AND s.municipio = l.municipio
+                JOIN tmp_posto_lookup po
+                    ON s.cnpj_revenda = po.cnpj_revenda
+                WHERE s.stg_id BETWEEN %s AND %s;
+            """, (current_id, end_id))
+            pg.commit()
+
+            rows = cursor.rowcount
+            inserted += rows
+            current_id = end_id + 1
+            pct = min((current_id - min_id) / total * 100, 100)
+            print(f"\t  ▸ {inserted:>12,} inseridos  ({pct:5.1f}%)")
+
+        # 5) Recria índices da fato
+        print("\t  ▸ Recriando índices da fato")
+        cursor.execute("""
+            CREATE INDEX idx_fact_data_id       ON fact_precos_combustivel(data_id);
+            CREATE INDEX idx_fact_produto_id    ON fact_precos_combustivel(produto_id);
+            CREATE INDEX idx_fact_localidade_id ON fact_precos_combustivel(localidade_id);
+            CREATE INDEX idx_fact_posto_id      ON fact_precos_combustivel(posto_id);
+        """)
+        pg.commit()
+
+        cursor.execute("ANALYZE fact_precos_combustivel;")
+        pg.commit()
+
+        cursor.execute("RESET work_mem;")
+        pg.commit()
         cursor.close()
+
+        print(f"\t- FATO CARREGADA COM SUCESSO ({inserted:,} registros)")
         
         close_conn(duck, db_path)

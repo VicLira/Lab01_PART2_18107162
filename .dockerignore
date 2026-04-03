@@ -1,0 +1,25 @@
+# Dados montados via volume, não precisam estar na imagem
+data/
+
+# Ambiente virtual local (a imagem usa uv sync próprio)
+.venv/
+
+# DuckDB temporário
+infra/repositories/*.db
+
+# Git
+.git/
+.gitignore
+
+# Cache Python
+__pycache__/
+*.pyc
+
+# IDE
+.vscode/
+.idea/
+
+# Docker
+docker-compose.yaml
+dockerfile
+.dockerignore

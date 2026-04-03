@@ -1,0 +1,216 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "links": [],
+  "panels": [
+    {
+      "id": 1,
+      "title": "Evolução do Preço Médio por Combustível",
+      "description": "Tendência de preços de venda ao longo dos anos",
+      "type": "timeseries",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 0 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "pg-gold" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 2, "fillOpacity": 10, "pointSize": 3, "spanNulls": true },
+          "unit": "currencyBRL"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max", "min"] },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT\n  MAKE_DATE(d.ano, d.mes, 1) AS \"time\",\n  p.produto AS metric,\n  ROUND(AVG(f.valor_venda)::numeric, 3) AS value\nFROM fact_precos_combustivel f\nJOIN dim_data d ON f.data_id = d.data_id\nJOIN dim_produto p ON f.produto_id = p.produto_id\nWHERE MAKE_DATE(d.ano, d.mes, 1) BETWEEN $__timeFrom()::date AND $__timeTo()::date\nGROUP BY d.ano, d.mes, p.produto\nORDER BY 1;",
+          "refId": "A",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Preço Médio de Venda por Produto",
+      "description": "Comparação do preço médio de venda entre todos os combustíveis",
+      "type": "barchart",
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 10 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "pg-gold" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "currencyBRL" },
+        "overrides": []
+      },
+      "options": { "orientation": "horizontal", "legend": { "displayMode": "hidden" }, "barWidth": 0.8 },
+      "targets": [
+        {
+          "rawSql": "SELECT\n  p.produto AS \"Produto\",\n  ROUND(AVG(f.valor_venda)::numeric, 3) AS \"Preço Médio\"\nFROM fact_precos_combustivel f\nJOIN dim_produto p ON f.produto_id = p.produto_id\nWHERE f.valor_venda > 0\nGROUP BY p.produto\nORDER BY \"Preço Médio\" DESC;",
+          "refId": "A",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Volume de Coletas por Ano",
+      "description": "Total de registros de preço coletados em cada ano",
+      "type": "barchart",
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 10 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "pg-gold" },
+      "fieldConfig": {
+        "defaults": { "color": { "fixedColor": "blue", "mode": "fixed" }, "unit": "short" },
+        "overrides": []
+      },
+      "options": { "orientation": "vertical", "legend": { "displayMode": "hidden" }, "barWidth": 0.7 },
+      "targets": [
+        {
+          "rawSql": "SELECT\n  d.ano::text AS \"Ano\",\n  COUNT(*)::bigint AS \"Coletas\"\nFROM fact_precos_combustivel f\nJOIN dim_data d ON f.data_id = d.data_id\nGROUP BY d.ano\nORDER BY d.ano;",
+          "refId": "A",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Margem Média (Venda - Compra) por Região",
+      "description": "Diferença entre preço de venda e compra por região e combustível",
+      "type": "barchart",
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 20 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "pg-gold" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "currencyBRL" },
+        "overrides": []
+      },
+      "options": { "orientation": "vertical", "legend": { "displayMode": "list", "placement": "bottom" }, "barWidth": 0.7 },
+      "targets": [
+        {
+          "rawSql": "SELECT\n  l.regiao_sigla AS \"Região\",\n  p.produto AS \"Produto\",\n  ROUND(AVG(f.valor_venda - f.valor_compra)::numeric, 3) AS \"Margem Média\"\nFROM fact_precos_combustivel f\nJOIN dim_localidade l ON f.localidade_id = l.localidade_id\nJOIN dim_produto p ON f.produto_id = p.produto_id\nWHERE f.valor_compra IS NOT NULL AND f.valor_venda IS NOT NULL\nGROUP BY l.regiao_sigla, p.produto\nORDER BY l.regiao_sigla;",
+          "refId": "A",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Market Share por Bandeira",
+      "description": "Participação de mercado das bandeiras por número de coletas",
+      "type": "piechart",
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 20 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "pg-gold" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" } },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "values": ["value", "percent"] },
+        "pieType": "donut",
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "tooltip": { "mode": "single" }
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT\n  COALESCE(NULLIF(po.bandeira, ''), 'BRANCA') AS \"Bandeira\",\n  COUNT(*)::bigint AS \"Total Coletas\"\nFROM fact_precos_combustivel f\nJOIN dim_posto po ON f.posto_id = po.posto_id\nGROUP BY po.bandeira\nORDER BY \"Total Coletas\" DESC\nLIMIT 15;",
+          "refId": "A",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Variação Trimestral: Gasolina vs Etanol",
+      "description": "Sazonalidade e competição entre gasolina e etanol",
+      "type": "timeseries",
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 30 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "pg-gold" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 2, "fillOpacity": 15, "pointSize": 5, "spanNulls": true },
+          "unit": "currencyBRL"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT\n  MAKE_DATE(d.ano, (d.trimestre - 1) * 3 + 1, 1) AS \"time\",\n  p.produto AS metric,\n  ROUND(AVG(f.valor_venda)::numeric, 3) AS value\nFROM fact_precos_combustivel f\nJOIN dim_data d ON f.data_id = d.data_id\nJOIN dim_produto p ON f.produto_id = p.produto_id\nWHERE p.produto IN ('GASOLINA', 'ETANOL')\n  AND MAKE_DATE(d.ano, (d.trimestre - 1) * 3 + 1, 1) BETWEEN $__timeFrom()::date AND $__timeTo()::date\nGROUP BY d.ano, d.trimestre, p.produto\nORDER BY 1;",
+          "refId": "A",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Resumo por Produto: Compra vs Venda vs Margem",
+      "description": "Comparação entre preço de compra, venda e margem por produto",
+      "type": "table",
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 30 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "pg-gold" },
+      "fieldConfig": {
+        "defaults": { "unit": "currencyBRL" },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "Produto" }, "properties": [{ "id": "unit", "value": "string" }] },
+          { "matcher": { "id": "byName", "options": "Total Registros" }, "properties": [{ "id": "unit", "value": "short" }] }
+        ]
+      },
+      "options": {},
+      "targets": [
+        {
+          "rawSql": "SELECT\n  p.produto AS \"Produto\",\n  ROUND(AVG(f.valor_compra)::numeric, 3) AS \"Preço Médio Compra\",\n  ROUND(AVG(f.valor_venda)::numeric, 3) AS \"Preço Médio Venda\",\n  ROUND(AVG(f.valor_venda - f.valor_compra)::numeric, 3) AS \"Margem Média\",\n  COUNT(*)::bigint AS \"Total Registros\"\nFROM fact_precos_combustivel f\nJOIN dim_produto p ON f.produto_id = p.produto_id\nWHERE f.valor_compra IS NOT NULL AND f.valor_venda IS NOT NULL AND f.valor_compra > 0 AND f.valor_venda > 0\nGROUP BY p.produto\nORDER BY \"Margem Média\" DESC;",
+          "refId": "A",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "Total de Registros",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 40 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "pg-gold" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [{ "rawSql": "SELECT COUNT(*)::bigint AS \"Total\" FROM fact_precos_combustivel;", "refId": "A", "format": "table" }]
+    },
+    {
+      "id": 11,
+      "title": "Produtos Distintos",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 40 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "pg-gold" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [{ "rawSql": "SELECT COUNT(*)::bigint AS \"Produtos\" FROM dim_produto;", "refId": "A", "format": "table" }]
+    },
+    {
+      "id": 12,
+      "title": "Municípios Cobertos",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 40 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "pg-gold" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [{ "rawSql": "SELECT COUNT(DISTINCT municipio)::bigint AS \"Municípios\" FROM dim_localidade;", "refId": "A", "format": "table" }]
+    },
+    {
+      "id": 13,
+      "title": "Postos Cadastrados",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 40 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "pg-gold" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [{ "rawSql": "SELECT COUNT(*)::bigint AS \"Postos\" FROM dim_posto;", "refId": "A", "format": "table" }]
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["combustiveis", "anp", "gold"],
+  "templating": { "list": [] },
+  "time": { "from": "now-20y", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Preços de Combustíveis - ANP (Gold)",
+  "uid": "combustiveis-gold",
+  "version": 2
+}
